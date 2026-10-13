@@ -157,8 +157,11 @@ count grants and changes from an empty vault.
 
 ## Deploy
 
-Live at `https://cce-sync.lsgalante12.workers.dev` (phase 1 deployed from
-688f887 on 2026-10-13; the user's vault was imported the same day).
+Live at `https://cce-sync.lsgalante12.workers.dev`: phase 1 from 688f887,
+then main at 03acbdb (phases 2-6, Worker version 757e6cd5), both on
+2026-10-13; the user's vault was imported the same day. The Google secrets
+(phase 3 and 6 below) are not set yet, so sign-in answers "isn't set up"
+and only the shared token works.
 `deploy.sh` builds the phone app from the sibling `../cce-vault-web`
 (`web/build.sh`, which needs the wasm32 target and the wasm-bindgen CLI at
 its lock's version) into `site/`, then deploys the Worker and the site
