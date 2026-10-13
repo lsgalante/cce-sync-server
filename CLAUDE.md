@@ -3,9 +3,11 @@
 cce-sync on Cloudflare: a Worker in front of one SQLite-backed Durable
 Object that holds the vault, with blobs over 1 MB in R2, the MCP server
 Claude's connector calls, the OAuth server that signs Claude and the phone
-in, and the phone app itself (cce-vault-web's PWA, as static assets). The
-sync and tool rules live in `cce-sync` (`core`, `mcp`); this crate is the
-host. The plan is the doc "cce-sync: design" (phases 1, 3 and 4).
+in, the phone app itself (cce-vault-web's PWA, as static assets), and the
+Google bridge (the day's agenda from Google Calendar, `#gtask` tasks kept in
+step with Google Tasks). The sync, tool and bridge rules live in `cce-sync`
+(`core`, `mcp`, `agenda`, `gtask`); this crate is the host. The plan is the
+doc "cce-sync: design" (phases 1, 3, 4 and 6).
 
 Read `../cce-sync/CLAUDE.md` first: the write rules, the protocol and their
 invariants are there.
@@ -16,9 +18,11 @@ invariants are there.
 | --- | --- |
 | `lib.rs` | The Worker's `fetch`: `/health`, everything else to the `VAULT` object named `vault` (requests for the site's files never reach it: the assets layer answers them) |
 | `route.rs` | `/v1`: method + URL → `Route`, the token compare, the device name. No Workers types: tested natively |
-| `object.rs` | `VaultObject`: authenticates and serves `/v1` over `Vault<SqlStore>`, `/mcp` over `cce_sync::mcp::Mcp`, `/oauth/*` and the `/.well-known` documents; the live sockets (hibernatable, opened by header or by ticket) and the seq notice after each commit, Claude's included |
+| `object.rs` | `VaultObject`: authenticates and serves `/v1` over `Vault<SqlStore>` (and `/v1/agenda`), `/mcp` over `cce_sync::mcp::Mcp` (with the agenda in `daily_note`), `/oauth/*` and the `/.well-known` documents; the live sockets (hibernatable, opened by header or by ticket) and the seq notice after each commit, Claude's included; the `#gtask` pass on the object's alarm |
 | `oauth.rs` | The OAuth server's rules: metadata, the 401 challenge, allowed redirects and clients (DCR, CIMD, the first-party phone app), which resource a client may ask for, PKCE, Google's ID token, the consent page. No Workers types: tested natively |
 | `auth.rs` | The OAuth server's storage (`oauth_*` and `live_tickets` tables) and endpoints: register, authorize (consent), Google sign-in, token (codes, rotating refresh tokens), access checks, grants, live-socket tickets |
+| `google.rs` | The Google bridge's host: the sealed refresh token (`google_token`) and access-token refresh, the agenda (calendar list + events, cached 5 min), Google Tasks calls, the `#gtask` bases and pending creations |
+| `seal.rs` | AES-256-GCM sealing of the refresh token under `GOOGLE_TOKEN_KEY`. No Workers types: tested natively |
 | `sql.rs` | `SqlStore`: the schema, `Store` over `ctx.storage.sql` and R2 |
 | `wrangler.toml` | The bindings: `VAULT` (Durable Object, SQLite migration `v1`), `BLOBS` (R2 bucket `cce-sync-blobs`), `[assets]` (`site/`, the phone app, built by `deploy.sh`, not committed); the `vault.lucas.co` route, commented out until lucas.co's DNS is on Cloudflare |
 
@@ -69,6 +73,20 @@ invariants are there.
   reused one revokes the grant); errors are `invalid_grant`, as Claude
   expects. The consent page shows the redirect's host and warns on
   loopback.
+- **The Google bridge's token comes from the user's own sign-in** (the one
+  allowed account): the Google step asks for Calendar (read-only) and
+  Tasks too, offline, with `prompt=consent` while no token is held (Google
+  sends a refresh token only on consent). It is stored sealed
+  (`GOOGLE_TOKEN_KEY`; without that secret it is not stored and the bridge
+  stays off) and never leaves the server. `invalid_grant` on refresh
+  forgets it; the next sign-in brings a new one.
+- **The `#gtask` pass runs on the object's alarm**, never inside a
+  request: 10 s after any commit not its own (Claude's included), 5 s after
+  a sign-in, then every 5 minutes while any task is promoted or a creation
+  is pending (Google Tasks has no push). It calls Google without the vault
+  lock, then re-reads each note under the lock and writes its line edits
+  as one batch from the device `google`, each conditional on the note as
+  re-read. A failed pass retries in 5 minutes.
 - **Google's ID token is not signature-checked**: it comes straight from
   Google's token endpoint over TLS (OIDC Core 3.1.3.7); issuer, audience,
   expiry, nonce, verified email are.
@@ -86,6 +104,7 @@ cargo build --target wasm32-unknown-unknown
 dev/e2e.sh                                                  # the /v1 API: wrangler dev + the CLI + curl
 dev/e2e-mcp.sh                                              # Claude's connector: OAuth + MCP + the laptop
 dev/e2e-phone.sh                                            # the phone: site, sign-in, /v1 tokens, live tickets
+dev/e2e-google.sh                                           # the Google bridge: agenda, daily_note, #gtask both ways
 ```
 
 To try an unpushed cce-sync change here, point the pin at the sibling for
@@ -114,6 +133,16 @@ origin, the first-party sign-in and the redirects and resources it must
 refuse, `/v1` with the phone's tokens (and not `/mcp`), refresh rotation,
 the live socket by ticket (once only), and revoking the phone's grant.
 
+`dev/e2e-google.sh` plays Google too (sign-in, Calendar, Tasks, on the same
+mock port) against a server with `GOOGLE_API_URL` and `GOOGLE_TOKEN_KEY` in
+`.dev.vars` (its header): the scopes asked for, the stored token's refresh,
+`/v1/agenda` (shown calendars only, local day, cached), `daily_note`, then a
+`#gtask` line created in Google, ticked there, renamed and re-dated in the
+vault, deleted on each side, and a refused refresh turning the bridge off.
+It takes about two minutes (each pass waits 10 s). Run each suite on its
+own fresh server (`rm -rf .wrangler` after the old one has exited): they
+count grants and changes from an empty vault.
+
 ## Settings
 
 | Name | Kind | What |
@@ -122,6 +151,8 @@ the live socket by ticket (once only), and revoking the phone's grant.
 | `GOOGLE_CLIENT_ID` | secret | A Google OAuth client of type **Web application** |
 | `GOOGLE_CLIENT_SECRET` | secret | Its secret |
 | `ALLOWED_EMAIL` | secret | The one Google account that may sign in (kept out of the public repo) |
+| `GOOGLE_TOKEN_KEY` | secret | 32 random bytes, base64 (`openssl rand -base64 32`): seals the bridge's Google refresh token. Changing it disconnects the bridge until the next sign-in |
+| `GOOGLE_API_URL` | `.dev.vars` only | The mock Google's APIs, for `dev/e2e-google.sh` |
 | `GOOGLE_AUTH_URL`, `GOOGLE_TOKEN_URL` | `.dev.vars` only | The mock Google, for `dev/e2e-mcp.sh` |
 
 ## Deploy
@@ -169,6 +200,24 @@ Phase 4, the phone, once Google sign-in works (above):
    download when opened.
 3. The phone's sign-in shows in `cce-sync grants` as "cce vault (the phone
    app)"; revoking it signs the phone out.
+
+Phase 6, the Google bridge, once the above works:
+
+1. Google Cloud console, the same project → APIs & Services → Library:
+   enable the **Google Calendar API** and the **Google Tasks API**. Then
+   OAuth consent screen → Data access: add the scopes
+   `.../auth/calendar.readonly` and `.../auth/tasks`. (With the app in
+   Testing, your account must be a test user; Google then expires refresh
+   tokens after 7 days, so publish the app to Production, unverified, for
+   a lasting token; only you can sign in anyway.)
+2. `npx wrangler secret put GOOGLE_TOKEN_KEY` (`openssl rand -base64 32`),
+   then `./deploy.sh`.
+3. Sign in once more from any client (the phone's Sign out then Sign in is
+   quickest): Google asks for Calendar and Tasks; allow both.
+   `cce-sync agenda` on the laptop then prints today's events.
+4. Daily notes show the agenda where the template has an empty
+   ```` ```agenda ```` block: add one to the daily-note template note.
+   Tag a task `#gtask` to send it to Google Tasks.
 
 Workers Paid ($5/month) is assumed: the Free plan's 10 ms CPU per request
 is too little for a merge or a big batch.

@@ -26,6 +26,7 @@ use worker::{
     SqlStorageValue as V,
 };
 
+use crate::google::{self, Google};
 use crate::oauth::{self, Client};
 use crate::sql::{int, opt_int, opt_text, text};
 
@@ -134,7 +135,7 @@ impl Auth {
     }
 
     /// Route `/oauth/*`.
-    pub async fn handle(&self, mut req: Request, origin: &str) -> Result<Response> {
+    pub async fn handle(&self, mut req: Request, origin: &str, google: &Google) -> Result<Response> {
         let url = req.url()?;
         let q = oauth::form(url.query().unwrap_or(""));
         match (req.method(), url.path()) {
@@ -145,9 +146,9 @@ impl Auth {
             (Method::Get, "/oauth/authorize") => self.authorize(&q, origin).await,
             (Method::Post, "/oauth/authorize") => {
                 let f = oauth::form(&req.text().await?);
-                self.to_google(f.get("request").map(String::as_str).unwrap_or_default(), origin)
+                self.to_google(f.get("request").map(String::as_str).unwrap_or_default(), origin, google)
             }
-            (Method::Get, "/oauth/google/callback") => self.google_callback(&q, origin).await,
+            (Method::Get, "/oauth/google/callback") => self.google_callback(&q, origin, google).await,
             (Method::Post, "/oauth/token") => {
                 let f = oauth::form(&req.text().await?);
                 self.token(&f, origin)
@@ -260,7 +261,7 @@ impl Auth {
         html(200, oauth::consent_page(&client.name, redirect_uri, &id))
     }
 
-    fn to_google(&self, request: &str, origin: &str) -> Result<Response> {
+    fn to_google(&self, request: &str, origin: &str, google: &Google) -> Result<Response> {
         let rows = self.rows("SELECT created FROM oauth_requests WHERE id = ?", vec![request.into()])?;
         let fresh = rows.first().and_then(|r| int(&r[0]).ok()).is_some_and(|t| now_s() - t < oauth::REQUEST_TTL_SECS);
         if !fresh {
@@ -276,24 +277,31 @@ impl Auth {
         let callback = format!("{origin}/oauth/google/callback");
         let challenge = oauth::s256(&verifier);
         let hint = self.setting("ALLOWED_EMAIL");
+        // The same sign-in gives the Google bridge Calendar (read-only) and
+        // Tasks, offline. Google sends a refresh token only on consent, so
+        // consent is asked for while the bridge holds none.
+        let scope = format!("openid email {} {}", google::CALENDAR_SCOPE, google::TASKS_SCOPE);
+        let prompt = if google.connected() { "select_account" } else { "consent select_account" };
         redirect(&oauth::with_query(
             &auth_url,
             &[
                 ("client_id", &google_id),
                 ("redirect_uri", &callback),
                 ("response_type", "code"),
-                ("scope", "openid email"),
+                ("scope", &scope),
+                ("access_type", "offline"),
+                ("include_granted_scopes", "true"),
                 ("state", request),
                 ("nonce", &nonce),
                 ("code_challenge", &challenge),
                 ("code_challenge_method", "S256"),
-                ("prompt", "select_account"),
+                ("prompt", prompt),
                 ("login_hint", &hint),
             ],
         ))
     }
 
-    async fn google_callback(&self, q: &std::collections::HashMap<String, String>, origin: &str) -> Result<Response> {
+    async fn google_callback(&self, q: &std::collections::HashMap<String, String>, origin: &str, google: &Google) -> Result<Response> {
         let id = q.get("state").cloned().unwrap_or_default();
         let rows = self.rows(
             "SELECT client_id, redirect_uri, state, challenge, resource, verifier, nonce, created FROM oauth_requests WHERE id = ?",
@@ -322,7 +330,17 @@ impl Auth {
             return back(vec![("error", "access_denied"), ("error_description", "Google sign-in was cancelled")]);
         };
         let email = match self.google_exchange(code, &verifier, &nonce, origin).await {
-            Ok(e) => e,
+            Ok((email, refresh, scopes)) => {
+                // Only the one allowed account gets here: its token feeds the
+                // bridge. Granted scopes without a new refresh token (Google
+                // sends one on consent only) leave the stored one in place.
+                if let Some(r) = refresh {
+                    if let Err(e) = google.save(&r, &scopes, origin) {
+                        console_error!("google bridge: not keeping the token: {e}");
+                    }
+                }
+                email
+            }
             Err(e) => {
                 console_error!("google sign-in: {e}");
                 return back(vec![("error", "access_denied"), ("error_description", &e)]);
@@ -347,8 +365,15 @@ impl Auth {
         back(vec![("code", &code)])
     }
 
-    /// Swap Google's code for its ID token and check who signed in.
-    async fn google_exchange(&self, code: &str, verifier: &str, nonce: &str, origin: &str) -> std::result::Result<String, String> {
+    /// Swap Google's code for its tokens and check who signed in: the
+    /// email, and the refresh token with its scopes when Google sent one.
+    async fn google_exchange(
+        &self,
+        code: &str,
+        verifier: &str,
+        nonce: &str,
+        origin: &str,
+    ) -> std::result::Result<(String, Option<String>, String), String> {
         let (id, secret) = (self.setting("GOOGLE_CLIENT_ID"), self.setting("GOOGLE_CLIENT_SECRET"));
         let token_url = Some(self.setting("GOOGLE_TOKEN_URL")).filter(|s| !s.is_empty()).unwrap_or_else(|| oauth::GOOGLE_TOKEN_URL.into());
         let body = format!(
@@ -369,7 +394,10 @@ impl Auth {
         let Some(id_token) = v.get("id_token").and_then(Value::as_str) else {
             return Err(format!("Google refused the sign-in: {}", v.get("error").and_then(Value::as_str).unwrap_or("no ID token")));
         };
-        oauth::check_id_token(id_token, &id, nonce, &self.setting("ALLOWED_EMAIL"), now_s())
+        let email = oauth::check_id_token(id_token, &id, nonce, &self.setting("ALLOWED_EMAIL"), now_s())?;
+        let refresh = v.get("refresh_token").and_then(Value::as_str).map(str::to_string);
+        let scopes = v.get("scope").and_then(Value::as_str).unwrap_or_default().to_string();
+        Ok((email, refresh, scopes))
     }
 
     fn token(&self, f: &std::collections::HashMap<String, String>, origin: &str) -> Result<Response> {

@@ -16,9 +16,12 @@
 
 pub mod oauth;
 pub mod route;
+pub mod seal;
 
 #[cfg(target_arch = "wasm32")]
 mod auth;
+#[cfg(target_arch = "wasm32")]
+mod google;
 #[cfg(target_arch = "wasm32")]
 mod object;
 #[cfg(target_arch = "wasm32")]
