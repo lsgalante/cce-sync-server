@@ -115,12 +115,11 @@ dependencies = [
 [[package]]
 name = "cce-sync"
 version = "0.1.0"
-source = "git+https://github.com/lsgalante/cce-sync.git?rev=e7316042be938b973d0aa76473239005e7a8783d#e7316042be938b973d0aa76473239005e7a8783d"
+source = "git+https://github.com/lsgalante/cce-sync.git?rev=df6284d2cece5c72b20c7c9d1cf5e42b6e122326#df6284d2cece5c72b20c7c9d1cf5e42b6e122326"
 dependencies = [
  "base64",
  "cce-vault",
  "chrono",
- "kdl",
  "serde",
  "serde_json",
  "sha2",
@@ -144,7 +143,7 @@ dependencies = [
 [[package]]
 name = "cce-vault"
 version = "0.1.0"
-source = "git+https://github.com/lsgalante/cce-vault.git?rev=ee2f46e35206779ad4fd5e4a1bdade01bde61977#ee2f46e35206779ad4fd5e4a1bdade01bde61977"
+source = "git+https://github.com/lsgalante/cce-vault.git?rev=87fa1695aa3ef1b2a3afa9dd034f789a8aed8c76#87fa1695aa3ef1b2a3afa9dd034f789a8aed8c76"
 dependencies = [
  "cce-core",
  "chrono",
