@@ -13,15 +13,16 @@ set -euo pipefail
 SERVER=${1:-http://127.0.0.1:8787}
 TOKEN=${2:-dev-token-123}
 HERE=$(cd "$(dirname "$0")" && pwd)
-# The cce-sync binary: $CCE_SYNC_CLI, else the workspace's shared target
-# (cce-sync is a member of the root workspace), else a standalone build.
-CLI=${CCE_SYNC_CLI:-}
-if [ -z "$CLI" ]; then
-    for c in "$HERE/../../target/debug/cce-sync" "$HERE/../../cce-sync/target/debug/cce-sync"; do
-        [ -x "$c" ] && { CLI=$c; break; }
-    done
+# The CLI's debug build, wherever cargo puts cce-sync's target: the cce
+# workspace's target/ (cce-sync is a member there), its own in a standalone
+# clone, or $CARGO_TARGET_DIR.
+if [ -z "${CCE_SYNC_CLI:-}" ]; then
+    target=$(cargo metadata --no-deps --format-version 1 \
+        --manifest-path "$HERE/../../cce-sync/Cargo.toml" | jq -r .target_directory)
+    CCE_SYNC_CLI=$target/debug/cce-sync
 fi
-[ -x "${CLI:-}" ] || { echo "no cce-sync binary: build it (cargo build -p cce-sync) or set CCE_SYNC_CLI" >&2; exit 1; }
+CLI=$CCE_SYNC_CLI
+[ -x "$CLI" ] || { echo "no cce-sync CLI at $CLI: cargo build -p cce-sync, or set CCE_SYNC_CLI" >&2; exit 1; }
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 AUTH=(-H "authorization: Bearer $TOKEN")
