@@ -139,8 +139,18 @@ impl Google {
             }
         }
         let (sealed, _, _) = self.row().ok_or("Google is not connected")?;
-        let key = crate::seal::key(&self.setting("GOOGLE_TOKEN_KEY"))?;
-        let refresh = crate::seal::open(&key, &sealed)?;
+        // A token that cannot be opened (the key changed or is gone) is
+        // forgotten, so the next sign-in asks Google for consent again and
+        // brings a new one.
+        let opened = crate::seal::key(&self.setting("GOOGLE_TOKEN_KEY")).and_then(|k| crate::seal::open(&k, &sealed));
+        let refresh = match opened {
+            Ok(r) => r,
+            Err(e) => {
+                console_error!("google: {e}; the bridge is off until the next sign-in");
+                self.disconnect();
+                return Err(e);
+            }
+        };
         let token_url = Some(self.setting("GOOGLE_TOKEN_URL")).filter(|s| !s.is_empty()).unwrap_or_else(|| oauth::GOOGLE_TOKEN_URL.into());
         let body = format!(
             "grant_type=refresh_token&refresh_token={}&client_id={}&client_secret={}",
