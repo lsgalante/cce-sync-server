@@ -18,7 +18,15 @@ pub enum Route {
     History(String),
     Blob(String),
     Live,
+    /// A single-use ticket for the live socket (browsers).
+    LiveTicket,
     Status,
+    /// The OAuth grants (what Claude has been allowed), and revoking one.
+    Grants,
+    RevokeGrant(String),
+    /// The local day's events from Google Calendar (`?date=YYYY-MM-DD`);
+    /// `None` when the date is missing or malformed.
+    Agenda(Option<String>),
     /// A file path that is not a valid vault path.
     BadPath(String),
     NotFound,
@@ -68,8 +76,18 @@ pub fn route(method: &str, path: &str, query: &str) -> Route {
         },
         ("GET", "blobs", Some(h)) if is_hash(h) => Route::Blob(h.to_string()),
         ("GET", "live", None) => Route::Live,
+        ("POST", "live-ticket", None) => Route::LiveTicket,
         ("GET", "status", None) => Route::Status,
-        (_, "changes" | "files" | "batch" | "history" | "blobs" | "live" | "status", _) => Route::MethodNotAllowed,
+        ("GET", "agenda", None) => Route::Agenda(
+            query
+                .split('&')
+                .find_map(|p| p.strip_prefix("date="))
+                .filter(|d| cce_sync::agenda::parse_date_ok(d))
+                .map(str::to_string),
+        ),
+        ("GET", "grants", None) => Route::Grants,
+        ("DELETE", "grants", Some(id)) if !id.is_empty() && !id.contains('/') => Route::RevokeGrant(id.to_string()),
+        (_, "changes" | "files" | "batch" | "history" | "blobs" | "live" | "live-ticket" | "status" | "grants" | "agenda", _) => Route::MethodNotAllowed,
         _ => Route::NotFound,
     }
 }
@@ -117,7 +135,14 @@ mod tests {
         let h = cce_sync::proto::hash(b"x");
         assert_eq!(route("GET", &format!("/v1/blobs/{h}"), ""), Route::Blob(h));
         assert_eq!(route("GET", "/v1/live", ""), Route::Live);
+        assert_eq!(route("GET", "/v1/live", "ticket=abc"), Route::Live);
+        assert_eq!(route("POST", "/v1/live-ticket", ""), Route::LiveTicket);
         assert_eq!(route("GET", "/v1/status", ""), Route::Status);
+        assert_eq!(route("GET", "/v1/agenda", "date=2026-10-13"), Route::Agenda(Some("2026-10-13".into())));
+        assert_eq!(route("GET", "/v1/agenda", "date=13.10.2026"), Route::Agenda(None));
+        assert_eq!(route("POST", "/v1/agenda", ""), Route::MethodNotAllowed);
+        assert_eq!(route("GET", "/v1/grants", ""), Route::Grants);
+        assert_eq!(route("DELETE", "/v1/grants/g_abc", ""), Route::RevokeGrant("g_abc".into()));
     }
 
     #[test]

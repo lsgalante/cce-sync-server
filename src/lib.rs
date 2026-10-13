@@ -1,17 +1,27 @@
 //! cce-sync-server: the vault's always-on home, a Cloudflare Worker.
 //!
-//! - The Worker ([`fetch`]) checks the bearer token and hands every `/v1`
-//!   request to the one vault Durable Object.
-//! - [`object::VaultObject`] serves the API over `cce_sync::core::Vault`.
+//! - The Worker ([`fetch`]) answers `/health` and hands everything else to
+//!   the one vault Durable Object, which authenticates.
+//! - [`object::VaultObject`] serves `/v1` over `cce_sync::core::Vault`,
+//!   `/mcp` (Claude's connector, `cce_sync::mcp`) and the OAuth server.
+//! - [`oauth`] is the OAuth server's rules, tested natively; `auth` its
+//!   storage and endpoints.
 //! - [`sql::SqlStore`] keeps the vault in the object's SQLite, blobs over
 //!   1 MB in R2.
 //! - [`route`] is the request side with no Workers types, tested natively.
 //!
-//! Auth is a single shared token (the `SYNC_TOKEN` secret) until phase 3
-//! brings the OAuth server; see the design doc "cce-sync: design".
+//! `/v1` takes the shared `SYNC_TOKEN` (the laptop daemon); `/mcp` takes an
+//! OAuth access token issued here after a Google sign-in as the one allowed
+//! account. See the design doc "cce-sync: design".
 
+pub mod oauth;
 pub mod route;
+pub mod seal;
 
+#[cfg(target_arch = "wasm32")]
+mod auth;
+#[cfg(target_arch = "wasm32")]
+mod google;
 #[cfg(target_arch = "wasm32")]
 mod object;
 #[cfg(target_arch = "wasm32")]
@@ -22,7 +32,6 @@ pub use object::VaultObject;
 
 #[cfg(target_arch = "wasm32")]
 mod worker_entry {
-    use crate::route::token_matches;
     use worker::*;
 
     /// The vault's Durable Object name. One vault per deployment.
@@ -34,13 +43,8 @@ mod worker_entry {
         if path == "/health" {
             return Response::ok("ok");
         }
-        if !path.starts_with("/v1/") {
-            return Response::error("not found", 404);
-        }
-        let secret = env.secret("SYNC_TOKEN").map(|s| s.to_string()).unwrap_or_default();
-        if !token_matches(req.headers().get("authorization")?.as_deref(), &secret) {
-            return Response::error("unauthorized", 401);
-        }
+        // Everything else is the object's: it holds the vault and the OAuth
+        // tables, and authenticates each request against them.
         let stub = env.durable_object("VAULT")?.id_from_name(VAULT_NAME)?.get_stub()?;
         stub.fetch_with_request(req).await
     }

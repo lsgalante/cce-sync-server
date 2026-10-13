@@ -5,7 +5,17 @@ main = "build/worker/shim.mjs"
 compatibility_date = "2025-09-01"
 
 [build]
-command = "worker-build --release"
+# site/ must exist for the assets binding even when the phone app is not
+# built (wrangler dev, tests); deploy.sh fills it.
+command = "mkdir -p site && worker-build --release"
+
+# The phone app (cce-vault-web's PWA), built into site/ by deploy.sh and
+# served from this origin, so it reaches /v1 and /oauth without CORS. A
+# request that names a file here gets the file; everything else (/v1, /mcp,
+# /oauth, /.well-known) reaches the Worker. No single-page fallback: it
+# would answer API paths with index.html.
+[assets]
+directory = "./site"
 
 # The vault: one SQLite-backed Durable Object, addressed by name ("vault").
 [[durable_objects.bindings]]

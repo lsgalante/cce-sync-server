@@ -14,13 +14,19 @@ crate-type = ["cdylib", "rlib"]
 # [patch] redirects it to ../cce-sync. Repin with ../bump-revs.sh after
 # pushing cce-sync. default-features = false: the CLI's deps don't build
 # for wasm32.
-cce-sync = { git = "https://github.com/lsgalante/cce-sync.git", rev = "171f18d0fb4a868457ca053dc782292c7148fa59", default-features = false }
+cce-sync = { git = "https://github.com/lsgalante/cce-sync.git", rev = "8688b361ab41210be4f8f04cc46c2a285728e599", default-features = false, features = ["mcp"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
+base64 = "0.22"
+# The Google refresh token, sealed at rest (`seal`).
+aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 worker = "0.8.7"
 async-lock = "3"
+# Tokens, codes and nonces: crypto.getRandomValues through the "js" backend.
+getrandom = { version = "0.2", features = ["js"] }
 
 [profile.release]
 opt-level = "s"
