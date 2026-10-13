@@ -37,7 +37,7 @@ fn err(e: impl std::fmt::Display) -> StoreError {
     StoreError(e.to_string())
 }
 
-fn int(v: &V) -> Result<i64, StoreError> {
+pub(crate) fn int(v: &V) -> Result<i64, StoreError> {
     match v {
         V::Integer(i) => Ok(*i),
         V::Float(f) if f.fract() == 0.0 => Ok(*f as i64),
@@ -45,21 +45,21 @@ fn int(v: &V) -> Result<i64, StoreError> {
     }
 }
 
-fn text(v: &V) -> Result<String, StoreError> {
+pub(crate) fn text(v: &V) -> Result<String, StoreError> {
     match v {
         V::String(s) => Ok(s.clone()),
         other => Err(StoreError(format!("expected text, got {other:?}"))),
     }
 }
 
-fn opt_text(v: &V) -> Result<Option<String>, StoreError> {
+pub(crate) fn opt_text(v: &V) -> Result<Option<String>, StoreError> {
     match v {
         V::Null => Ok(None),
         other => text(other).map(Some),
     }
 }
 
-fn opt_int(v: &V) -> Result<Option<i64>, StoreError> {
+pub(crate) fn opt_int(v: &V) -> Result<Option<i64>, StoreError> {
     match v {
         V::Null => Ok(None),
         other => int(other).map(Some),
