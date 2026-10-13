@@ -70,6 +70,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 [[package]]
 name = "cce-sync"
 version = "0.1.0"
+source = "git+https://github.com/lsgalante/cce-sync.git?rev=171f18d0fb4a868457ca053dc782292c7148fa59#171f18d0fb4a868457ca053dc782292c7148fa59"
 dependencies = [
  "base64",
  "serde",
