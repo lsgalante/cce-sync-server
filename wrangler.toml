@@ -1,0 +1,29 @@
+# cce-sync on Cloudflare. Deploy with ./deploy.sh (needs `wrangler login`
+# once, and the SYNC_TOKEN secret: `npx wrangler secret put SYNC_TOKEN`).
+name = "cce-sync"
+main = "build/worker/shim.mjs"
+compatibility_date = "2025-09-01"
+
+[build]
+command = "worker-build --release"
+
+# The vault: one SQLite-backed Durable Object, addressed by name ("vault").
+[[durable_objects.bindings]]
+name = "VAULT"
+class_name = "VaultObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["VaultObject"]
+
+# Blobs over 1 MB (attachments, their versions); smaller ones live in the
+# Durable Object's SQLite.
+[[r2_buckets]]
+binding = "BLOBS"
+bucket_name = "cce-sync-blobs"
+
+# vault.lucas.co, once lucas.co's DNS is on Cloudflare (see the design doc's
+# open question). Until then the Worker answers on its workers.dev address.
+# [[routes]]
+# pattern = "vault.lucas.co"
+# custom_domain = true

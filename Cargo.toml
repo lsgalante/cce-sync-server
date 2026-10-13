@@ -1,0 +1,26 @@
+[package]
+name = "cce-sync-server"
+version = "0.1.0"
+edition = "2021"
+description = "cce-sync on Cloudflare: the Worker, the vault Durable Object (SQLite) and R2 blobs"
+
+# A cdylib for worker-build (the Worker), and an rlib so `cargo test` runs
+# the portable half natively.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Pinned by rev on GitHub once pushed; the workspace root patches it to
+# ../cce-sync. Until the repo exists it is a path dependency.
+cce-sync = { path = "../cce-sync", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+worker = "0.8.7"
+async-lock = "3"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
