@@ -3,6 +3,10 @@
 name = "cce-sync"
 main = "build/worker/shim.mjs"
 compatibility_date = "2025-09-01"
+# The workers.dev address stays on beside vault.lucas.co (the route below):
+# tokens are bound to the origin they were issued on, so clients signed in
+# there keep working until they move.
+workers_dev = true
 
 [build]
 # site/ must exist for the assets binding even when the phone app is not
@@ -32,8 +36,8 @@ new_sqlite_classes = ["VaultObject"]
 binding = "BLOBS"
 bucket_name = "cce-sync-blobs"
 
-# vault.lucas.co, once lucas.co's DNS is on Cloudflare (see the design doc's
-# open question). Until then the Worker answers on its workers.dev address.
-# [[routes]]
-# pattern = "vault.lucas.co"
-# custom_domain = true
+# vault.lucas.co (lucas.co's zone is in this account; workers_dev, at the
+# top, keeps the old address too).
+[[routes]]
+pattern = "vault.lucas.co"
+custom_domain = true

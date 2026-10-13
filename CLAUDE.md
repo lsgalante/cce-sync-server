@@ -24,7 +24,7 @@ invariants are there.
 | `google.rs` | The Google bridge's host: the sealed refresh token (`google_token`) and access-token refresh, the agenda (calendar list + events, cached 5 min), Google Tasks calls, the `#gtask` bases and pending creations |
 | `seal.rs` | AES-256-GCM sealing of the refresh token under `GOOGLE_TOKEN_KEY`. No Workers types: tested natively |
 | `sql.rs` | `SqlStore`: the schema, `Store` over `ctx.storage.sql` and R2 |
-| `wrangler.toml` | The bindings: `VAULT` (Durable Object, SQLite migration `v1`), `BLOBS` (R2 bucket `cce-sync-blobs`), `[assets]` (`site/`, the phone app, built by `deploy.sh`, not committed); the `vault.lucas.co` route, commented out until lucas.co's DNS is on Cloudflare |
+| `wrangler.toml` | The bindings: `VAULT` (Durable Object, SQLite migration `v1`), `BLOBS` (R2 bucket `cce-sync-blobs`), `[assets]` (`site/`, the phone app, built by `deploy.sh`, not committed); the `vault.lucas.co` custom domain, with the workers.dev address kept on |
 
 ## Invariants
 
@@ -157,16 +157,17 @@ count grants and changes from an empty vault.
 
 ## Deploy
 
-Live at `https://cce-sync.lsgalante12.workers.dev`: phase 1 from 688f887,
+Live at `https://vault.lucas.co` (custom domain since 2026-10-13; the
+workers.dev address stays on, and tokens issued there keep working there,
+since each is bound to its origin). Deployed: phase 1 from 688f887,
 then main at 03acbdb (phases 2-6, Worker version 757e6cd5), both on
-2026-10-13; the user's vault was imported the same day. The Google secrets
-(phase 3 and 6 below) are not set yet, so sign-in answers "isn't set up"
-and only the shared token works.
+2026-10-13; the user's vault was imported the same day. All Google secrets
+are set; the Google client's redirect URIs must list
+`/oauth/google/callback` on BOTH origins.
 `deploy.sh` builds the phone app from the sibling `../cce-vault-web`
 (`web/build.sh`, which needs the wasm32 target and the wasm-bindgen CLI at
 its lock's version) into `site/`, then deploys the Worker and the site
 together; `NO_APP=1` deploys the Worker with whatever `site/` holds.
-`vault.lucas.co` waits on lucas.co's DNS moving to Cloudflare.
 
 ```sh
 npx wrangler login                     # once
