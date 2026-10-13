@@ -18,6 +18,8 @@ pub enum Route {
     History(String),
     Blob(String),
     Live,
+    /// A single-use ticket for the live socket (browsers).
+    LiveTicket,
     Status,
     /// The OAuth grants (what Claude has been allowed), and revoking one.
     Grants,
@@ -71,10 +73,11 @@ pub fn route(method: &str, path: &str, query: &str) -> Route {
         },
         ("GET", "blobs", Some(h)) if is_hash(h) => Route::Blob(h.to_string()),
         ("GET", "live", None) => Route::Live,
+        ("POST", "live-ticket", None) => Route::LiveTicket,
         ("GET", "status", None) => Route::Status,
         ("GET", "grants", None) => Route::Grants,
         ("DELETE", "grants", Some(id)) if !id.is_empty() && !id.contains('/') => Route::RevokeGrant(id.to_string()),
-        (_, "changes" | "files" | "batch" | "history" | "blobs" | "live" | "status" | "grants", _) => Route::MethodNotAllowed,
+        (_, "changes" | "files" | "batch" | "history" | "blobs" | "live" | "live-ticket" | "status" | "grants", _) => Route::MethodNotAllowed,
         _ => Route::NotFound,
     }
 }
@@ -122,6 +125,8 @@ mod tests {
         let h = cce_sync::proto::hash(b"x");
         assert_eq!(route("GET", &format!("/v1/blobs/{h}"), ""), Route::Blob(h));
         assert_eq!(route("GET", "/v1/live", ""), Route::Live);
+        assert_eq!(route("GET", "/v1/live", "ticket=abc"), Route::Live);
+        assert_eq!(route("POST", "/v1/live-ticket", ""), Route::LiveTicket);
         assert_eq!(route("GET", "/v1/status", ""), Route::Status);
         assert_eq!(route("GET", "/v1/grants", ""), Route::Grants);
         assert_eq!(route("DELETE", "/v1/grants/g_abc", ""), Route::RevokeGrant("g_abc".into()));

@@ -42,6 +42,7 @@ const SCHEMA: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS oauth_grants (
         id TEXT PRIMARY KEY, client_id TEXT NOT NULL, client_name TEXT NOT NULL, email TEXT NOT NULL,
         resource TEXT NOT NULL, created INTEGER NOT NULL, last_used INTEGER NOT NULL, revoked INTEGER NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS live_tickets (hash TEXT PRIMARY KEY, expires INTEGER NOT NULL)",
     "CREATE TABLE IF NOT EXISTS oauth_tokens (
         hash TEXT PRIMARY KEY, grant_id TEXT NOT NULL, kind TEXT NOT NULL, expires INTEGER NOT NULL,
         used INTEGER NOT NULL)",
@@ -84,7 +85,12 @@ fn html(status: u16, body: String) -> Result<Response> {
     headers.set("cache-control", "no-store")?;
     // The consent page must not be framed (clickjacking).
     headers.set("x-frame-options", "DENY")?;
-    headers.set("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")?;
+    // No form-action: browsers apply it to every redirect after the consent
+    // form's POST (to Google, our callback, and on to the client's
+    // redirect when Google answers at once), so no list of origins is right.
+    // With no script allowed and every value escaped, the page has nothing
+    // to inject a form with.
+    headers.set("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'")?;
     Ok(Response::ok(body)?.with_headers(headers).with_status(status))
 }
 
@@ -144,7 +150,7 @@ impl Auth {
             (Method::Get, "/oauth/google/callback") => self.google_callback(&q, origin).await,
             (Method::Post, "/oauth/token") => {
                 let f = oauth::form(&req.text().await?);
-                self.token(&f)
+                self.token(&f, origin)
             }
             _ => Response::error("not found", 404),
         }
@@ -174,7 +180,10 @@ impl Auth {
 
     /// A known client, or a Client ID Metadata Document fetched (and kept
     /// for a day).
-    async fn client(&self, client_id: &str) -> std::result::Result<Client, String> {
+    async fn client(&self, client_id: &str, origin: &str) -> std::result::Result<Client, String> {
+        if client_id == oauth::FIRST_PARTY {
+            return Ok(oauth::first_party(origin));
+        }
         let rows = self
             .rows("SELECT name, redirect_uris, created FROM oauth_clients WHERE client_id = ?", vec![client_id.into()])
             .map_err(|e| e.to_string())?;
@@ -206,12 +215,12 @@ impl Auth {
         let get = |k: &str| q.get(k).map(String::as_str).unwrap_or_default();
         // Until the client and redirect check out, errors are shown here:
         // never redirect anywhere unverified.
-        let client = match self.client(get("client_id")).await {
+        let client = match self.client(get("client_id"), origin).await {
             Ok(c) => c,
             Err(e) => return html(400, oauth::error_page(&e)),
         };
         let redirect_uri = get("redirect_uri");
-        if !oauth::redirect_allowed(redirect_uri) || !oauth::redirect_matches(&client.redirect_uris, redirect_uri) {
+        if !oauth::redirect_ok(&client, redirect_uri) {
             return html(400, oauth::error_page("That redirect address isn't registered for this client."));
         }
         let state = q.get("state").cloned();
@@ -228,10 +237,10 @@ impl Auth {
         if get("code_challenge").is_empty() || get("code_challenge_method") != "S256" {
             return back("invalid_request", "PKCE with S256 is required");
         }
-        let resource = oauth::resource(origin);
-        if !get("resource").is_empty() && get("resource") != resource {
-            return back("invalid_target", "this server's resource is its /mcp endpoint");
-        }
+        let resource = match oauth::resource_for(origin, get("resource"), &client.client_id) {
+            Ok(r) => r,
+            Err(e) => return back("invalid_target", e),
+        };
         let id = random(24);
         let now = now_s();
         self.exec("DELETE FROM oauth_requests WHERE created < ?", vec![V::Integer(now - oauth::REQUEST_TTL_SECS)])?;
@@ -363,7 +372,7 @@ impl Auth {
         oauth::check_id_token(id_token, &id, nonce, &self.setting("ALLOWED_EMAIL"), now_s())
     }
 
-    fn token(&self, f: &std::collections::HashMap<String, String>) -> Result<Response> {
+    fn token(&self, f: &std::collections::HashMap<String, String>, origin: &str) -> Result<Response> {
         let get = |k: &str| f.get(k).map(String::as_str).unwrap_or_default();
         let now = now_s();
         match get("grant_type") {
@@ -392,13 +401,16 @@ impl Auth {
                     return token_error("invalid_grant", "PKCE verification failed");
                 }
                 if !get("resource").is_empty() && get("resource") != resource {
-                    return token_error("invalid_target", "this server's resource is its /mcp endpoint");
+                    return token_error("invalid_target", "the code was issued for another resource");
                 }
-                let name = self
-                    .rows("SELECT name FROM oauth_clients WHERE client_id = ?", vec![client_id.as_str().into()])?
-                    .first()
-                    .and_then(|r| text(&r[0]).ok())
-                    .unwrap_or_else(|| client_id.clone());
+                let name = if client_id == oauth::FIRST_PARTY {
+                    oauth::first_party(origin).name
+                } else {
+                    self.rows("SELECT name FROM oauth_clients WHERE client_id = ?", vec![client_id.as_str().into()])?
+                        .first()
+                        .and_then(|r| text(&r[0]).ok())
+                        .unwrap_or_else(|| client_id.clone())
+                };
                 let grant = format!("g_{}", random(12));
                 self.exec(
                     "INSERT INTO oauth_grants (id, client_id, client_name, email, resource, created, last_used, revoked)
@@ -429,7 +441,7 @@ impl Auth {
                     return token_error("invalid_grant", "refresh token belongs to another client");
                 }
                 if !get("resource").is_empty() && get("resource") != text(&r[5]).map_err(err)? {
-                    return token_error("invalid_target", "this server's resource is its /mcp endpoint");
+                    return token_error("invalid_target", "the grant is for another resource");
                 }
                 self.exec("UPDATE oauth_tokens SET used = 1 WHERE hash = ?", vec![hash.into()])?;
                 self.issue(&grant, now)
@@ -477,6 +489,29 @@ impl Auth {
         let grant = text(&r[0]).ok()?;
         let _ = self.exec("UPDATE oauth_grants SET last_used = ? WHERE id = ?", vec![V::Integer(now), grant.as_str().into()]);
         Some(grant)
+    }
+
+    /// A single-use ticket for the live socket, good for a minute: a
+    /// browser cannot put a token on a WebSocket, so it trades one here
+    /// and puts the ticket in the socket's URL.
+    pub fn ticket(&self) -> Result<String> {
+        let now = now_s();
+        self.exec("DELETE FROM live_tickets WHERE expires < ?", vec![V::Integer(now)])?;
+        let t = random(24);
+        self.exec("INSERT INTO live_tickets (hash, expires) VALUES (?, ?)", vec![oauth::digest(&t).into(), V::Integer(now + 60)])?;
+        Ok(t)
+    }
+
+    /// Spend a ticket: true once, within its minute.
+    pub fn take_ticket(&self, t: &str) -> bool {
+        let h = oauth::digest(t);
+        let ok = self
+            .rows("SELECT expires FROM live_tickets WHERE hash = ?", vec![h.as_str().into()])
+            .ok()
+            .and_then(|r| r.first().and_then(|r| int(&r[0]).ok()))
+            .is_some_and(|e| e >= now_s());
+        let _ = self.exec("DELETE FROM live_tickets WHERE hash = ?", vec![h.into()]);
+        ok
     }
 
     pub fn grants(&self) -> Result<Vec<GrantInfo>> {

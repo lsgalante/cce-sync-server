@@ -72,7 +72,8 @@ impl DurableObject for VaultObject {
             p if p.starts_with("/v1/") => {}
             _ => return Response::error("not found", 404),
         }
-        if !token_matches(req.headers().get("authorization")?.as_deref(), &self.shared_token()) {
+        if !self.v1_allowed(&req, &url, &origin)? {
+            let _ = req.bytes().await; // drained, or the runtime logs an error
             return Response::error("unauthorized", 401);
         }
         let method = req.method().to_string();
@@ -160,6 +161,7 @@ impl DurableObject for VaultObject {
                 }
                 self.write(ops, &dev).await
             }
+            Route::LiveTicket => json(&serde_json::json!({ "ticket": self.auth.ticket()?, "expires_in": 60 }), 200),
             Route::Grants => json(&self.auth.grants()?, 200),
             Route::RevokeGrant(id) => match self.auth.revoke(&id)? {
                 true => json(&serde_json::json!({ "revoked": id }), 200),
@@ -195,6 +197,26 @@ impl DurableObject for VaultObject {
 }
 
 impl VaultObject {
+    /// `/v1`: the shared token (the laptop), an access token issued to the
+    /// phone app for the sync API, or, for the live socket only, a
+    /// single-use ticket in the URL (browsers can't set headers on a
+    /// WebSocket).
+    fn v1_allowed(&self, req: &Request, url: &Url, origin: &str) -> Result<bool> {
+        let authz = req.headers().get("authorization")?;
+        if token_matches(authz.as_deref(), &self.shared_token()) {
+            return Ok(true);
+        }
+        if let Some(bearer) = authz.as_deref().and_then(|a| a.strip_prefix("Bearer ")).filter(|b| !b.is_empty()) {
+            return Ok(self.auth.access(bearer, &oauth::sync_resource(origin)).is_some());
+        }
+        if url.path() == "/v1/live" {
+            if let Some((_, t)) = url.query_pairs().find(|(k, _)| k == "ticket") {
+                return Ok(self.auth.take_ticket(&t));
+            }
+        }
+        Ok(false)
+    }
+
     fn shared_token(&self) -> String {
         self.env.secret("SYNC_TOKEN").map(|s| s.to_string()).unwrap_or_default()
     }

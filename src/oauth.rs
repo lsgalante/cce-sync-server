@@ -41,9 +41,43 @@ const CLAUDE_CALLBACKS: &[&str] = &["https://claude.ai/api/mcp/auth_callback", "
 /// Hosts whose Client ID Metadata Documents are fetched.
 const CIMD_HOSTS: &[&str] = &["claude.ai", "claude.com", "anthropic.com"];
 
-/// The MCP endpoint, which is also the resource tokens are bound to.
+/// The MCP endpoint, which is also the resource Claude's tokens are bound
+/// to.
 pub fn resource(origin: &str) -> String {
     format!("{origin}/mcp")
+}
+
+/// The sync API, the resource the phone app's tokens are bound to.
+pub fn sync_resource(origin: &str) -> String {
+    format!("{origin}/v1")
+}
+
+/// The phone app (cce-vault-web), served by this Worker: a built-in public
+/// client that may only send the user back to this origin, and the only
+/// client that may ask for the sync API.
+pub const FIRST_PARTY: &str = "cce-vault-web";
+
+pub fn first_party(origin: &str) -> Client {
+    Client { client_id: FIRST_PARTY.into(), name: "cce vault (the phone app)".into(), redirect_uris: vec![format!("{origin}/")] }
+}
+
+/// The resource a sign-in is for: `/mcp` unless the phone app asks for
+/// `/v1`. Anything else is `invalid_target`.
+pub fn resource_for(origin: &str, requested: &str, client_id: &str) -> Result<String, &'static str> {
+    let mcp = resource(origin);
+    if requested.is_empty() || requested == mcp {
+        return Ok(mcp);
+    }
+    if requested == sync_resource(origin) {
+        return if client_id == FIRST_PARTY { Ok(requested.to_string()) } else { Err("only the vault's own app may use the sync API") };
+    }
+    Err("this server's resources are its /mcp and /v1 endpoints")
+}
+
+/// Whether a client may send a code to `redirect_uri`: one it registered,
+/// and either Claude's or loopback, or the phone app back to this origin.
+pub fn redirect_ok(client: &Client, redirect_uri: &str) -> bool {
+    redirect_matches(&client.redirect_uris, redirect_uri) && (client.client_id == FIRST_PARTY || redirect_allowed(redirect_uri))
 }
 
 pub fn resource_metadata_url(origin: &str) -> String {
@@ -383,6 +417,21 @@ mod tests {
         let c = cimd_client(url, doc.as_bytes()).unwrap();
         assert_eq!(c.redirect_uris.len(), 2);
         assert!(cimd_client("https://claude.ai/other", doc.as_bytes()).is_err(), "client_id must equal the URL");
+    }
+
+    #[test]
+    fn the_phone_app() {
+        let o = "https://v.example";
+        let app = first_party(o);
+        assert!(redirect_ok(&app, "https://v.example/"));
+        assert!(!redirect_ok(&app, "https://evil.example/"));
+        assert!(!redirect_ok(&app, "https://claude.ai/api/mcp/auth_callback"), "only back to its own page");
+        assert_eq!(resource_for(o, "https://v.example/v1", FIRST_PARTY).unwrap(), "https://v.example/v1");
+        assert!(resource_for(o, "https://v.example/v1", "c_claude").is_err(), "Claude gets /mcp only");
+        assert_eq!(resource_for(o, "", "c_claude").unwrap(), "https://v.example/mcp");
+        assert!(resource_for(o, "https://other.example/mcp", FIRST_PARTY).is_err());
+        let claude = Client { client_id: "c1".into(), name: "Claude".into(), redirect_uris: vec!["https://claude.ai/api/mcp/auth_callback".into()] };
+        assert!(redirect_ok(&claude, "https://claude.ai/api/mcp/auth_callback"));
     }
 
     #[test]
