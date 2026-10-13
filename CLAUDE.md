@@ -39,18 +39,35 @@ invariants are there.
 
 ## Build, test, run
 
+The root workspace **excludes** this crate (Cargo will not build a Worker
+from inside the tree as a non-member), so build and test it from its own
+directory, against its own `Cargo.lock` and its git pin of cce-sync:
+
 ```sh
-cargo test -p cce-sync-server                               # route.rs, natively
-cargo build -p cce-sync-server --target wasm32-unknown-unknown
+cd cce-sync-server
+cargo test                                                  # route.rs, natively
+cargo build --target wasm32-unknown-unknown
 dev/e2e.sh                                                  # wrangler dev + the CLI + curl, locally
 ```
+
+To try an unpushed cce-sync change here, point the pin at the sibling for
+the run (`cce-sync = { path = "../cce-sync", default-features = false }`)
+and put the git pin back before committing; `../bump-revs.sh` repins after
+cce-sync is pushed.
 
 `dev/e2e.sh` runs the Worker under `wrangler dev` (local workerd, local
 SQLite and R2 under `.wrangler/`), imports a sample vault with the
 `cce-sync` CLI, and checks writes, conflicts, merges, the feed and the live
-socket. It needs `worker-build` (`cargo install worker-build`) and Node.
+socket. It needs `worker-build` (`cargo install worker-build`) and Node, and
+finds the `cce-sync` binary in the workspace's `target/` or a standalone
+build (or `$CCE_SYNC_CLI`). It expects an **empty** vault: never point it at
+the deployed server.
 
 ## Deploy
+
+Live at `https://cce-sync.lsgalante12.workers.dev` (deployed from 688f887
+on 2026-10-13; the user's vault was imported the same day). `vault.lucas.co`
+waits on lucas.co's DNS moving to Cloudflare.
 
 ```sh
 npx wrangler login                     # once
