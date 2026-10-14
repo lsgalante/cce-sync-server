@@ -7,6 +7,10 @@
 # already holds.
 set -eu
 cd "$(dirname "$0")"
+# worker-build installs into cargo's bin dir, which a non-login shell may
+# not have on PATH; wrangler's custom build runs it from PATH.
+PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+export PATH
 command -v worker-build >/dev/null || cargo install worker-build
 if [ -z "${NO_APP:-}" ]; then
     app=../cce-vault-web
