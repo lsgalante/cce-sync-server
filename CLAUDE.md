@@ -109,7 +109,7 @@ dev/e2e-google.sh                                           # the Google bridge:
 ```
 
 To try an unpushed cce-sync change here, point the pin at the sibling for
-the run (`cce-sync = { path = "../cce-sync", default-features = false, features = ["mcp"] }`)
+the run (`cce-sync = { path = "../cce-sync", default-features = false, features = ["mcp", "xlsx"] }`)
 and put the git pin back before committing; `../bump-revs.sh` repins after
 cce-sync is pushed.
 
