@@ -150,7 +150,7 @@ dependencies = [
 [[package]]
 name = "cce-sync"
 version = "0.1.0"
-source = "git+https://github.com/lsgalante/cce-sync.git?rev=956a3044ce8ac62be148e6f6c31169f9e75b5473#956a3044ce8ac62be148e6f6c31169f9e75b5473"
+source = "git+https://github.com/lsgalante/cce-sync.git?rev=0fdb1b89c7d21420b2ce1cc2c2af6cdcf81d5d48#0fdb1b89c7d21420b2ce1cc2c2af6cdcf81d5d48"
 dependencies = [
  "base64",
  "cce-vault",
