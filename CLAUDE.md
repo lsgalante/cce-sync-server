@@ -161,7 +161,8 @@ Live at `https://vault.lucas.co` (custom domain since 2026-10-13; the
 workers.dev address stays on, and tokens issued there keep working there,
 since each is bound to its origin). Deployed: phase 1 from 688f887,
 then main at 03acbdb (phases 2-6, Worker version 757e6cd5), both on
-2026-10-13; the user's vault was imported the same day. All Google secrets
+2026-10-13, then the table tools (cce-sync 0fdb1b8, Worker version
+0ba23485, `NO_APP=1`) the same evening; the user's vault was imported the same day. All Google secrets
 are set; the Google client's redirect URIs must list
 `/oauth/google/callback` on BOTH origins.
 `deploy.sh` builds the phone app from the sibling `../cce-vault-web`
