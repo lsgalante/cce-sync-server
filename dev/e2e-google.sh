@@ -8,7 +8,7 @@
 #   GOOGLE_API_URL=http://127.0.0.1:8790
 #   GOOGLE_TOKEN_KEY=$(openssl rand -base64 32)
 #   V
-#   wrangler dev --port 8787
+#   wrangler dev --port 8787 --local-upstream 127.0.0.1:8787
 #   dev/e2e-google.sh
 #
 # It takes about two minutes: the bridge runs 10 s after a commit. Never

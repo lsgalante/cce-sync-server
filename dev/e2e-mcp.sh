@@ -13,7 +13,7 @@
 #   GOOGLE_AUTH_URL=http://127.0.0.1:8790/auth
 #   GOOGLE_TOKEN_URL=http://127.0.0.1:8790/token
 #   V
-#   wrangler dev --port 8787
+#   wrangler dev --port 8787 --local-upstream 127.0.0.1:8787
 #   dev/e2e-mcp.sh
 #
 # Never against the deployed server.
@@ -45,4 +45,9 @@ if grep -q 'edited line' "$WORK/vault/Archive/From Claude.md" && grep -q 'talked
     echo "  ok    Claude's notes are in the folder"
 else
     echo "  FAIL  Claude's notes are not in the folder"; find "$WORK/vault" -type f; exit 1
+fi
+if grep -q 'Shop, Inc' "$WORK/vault/Finance/Ledger.csv" && [ "$(head -c 2 "$WORK/vault/Finance/Budget.xlsx")" = PK ]; then
+    echo "  ok    and Claude's table and workbook"
+else
+    echo "  FAIL  Claude's table or workbook is not in the folder"; find "$WORK/vault" -type f; exit 1
 fi

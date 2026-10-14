@@ -144,6 +144,24 @@ try {
   const shared = await call("search", { query: "edited" }, SHARED);
   check("the shared token also works on /mcp (Claude Code by header)", shared.text.startsWith("Archive/From Claude.md"), true);
 
+  console.log("== tables and workbooks");
+  c = await call("write_table", { path: "Finance/Ledger.csv", content: "Date,Payee,Amount\n2026-10-01,Rent,1200\n" });
+  check("write_table creates a CSV", c.text, "created Finance/Ledger.csv (1 rows), now rev 1");
+  c = await call("append_rows", { path: "Finance/Ledger.csv", rows: '2026-10-03,"Shop, Inc",42' });
+  check("append_rows", c.text, "appended 1 row to Finance/Ledger.csv, now rev 2");
+  c = await call("append_rows", { path: "Finance/Ledger.csv", rows: "2026-10-04,short" });
+  check("  a row of the wrong width is refused", c.error && c.text.includes("the header has 3"), true);
+  c = await call("read_table", { path: "Finance/Ledger.csv" });
+  check("read_table", c.text.endsWith('2026-10-03,"Shop, Inc",42\n') && c.text.includes("rows: 2"), true);
+  c = await call("create_spreadsheet", { path: "Finance/Budget.xlsx", sheets: [{ name: "Budget", rows: [["Item", "Cost"], ["Rent", 1200], ["Food", 300], ["Total", "=SUM(B2:B3)"]] }] });
+  check("create_spreadsheet (IronCalc in the Worker)", c.text, "created Finance/Budget.xlsx (1 sheet), rev 1");
+  c = await call("append_spreadsheet_rows", { path: "Finance/Budget.xlsx", rows: [["Gas", 40]] });
+  check("append_spreadsheet_rows", c.text, "appended rows 5-5 to Finance/Budget.xlsx, now rev 2");
+  c = await call("set_cells", { path: "Finance/Budget.xlsx", cells: { B4: "=SUM(B2:B3)+B5" } });
+  check("set_cells recalculates", c.text.endsWith("B4 = 1540 (=SUM(B2:B3)+B5)"), true);
+  c = await call("read_spreadsheet", { path: "Finance/Budget.xlsx" });
+  check("read_spreadsheet", c.text.includes("sheets: Budget (A1:B5)") && c.text.includes("4\tTotal\t1540"), true);
+
   console.log("== refresh rotation");
   r = await token({ grant_type: "refresh_token", refresh_token: tok.refresh_token, client_id: client.client_id });
   const tok2 = await r.json();

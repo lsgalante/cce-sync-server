@@ -6,7 +6,7 @@
 #
 #   rm -rf .wrangler
 #   ../cce-vault-web/web/build.sh "$PWD/site"     # or any site/ with an index.html
-#   wrangler dev --port 8787
+#   wrangler dev --port 8787 --local-upstream 127.0.0.1:8787
 #   dev/e2e-phone.sh
 #
 # Never against the deployed server.

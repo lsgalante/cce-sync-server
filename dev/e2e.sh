@@ -3,7 +3,7 @@
 # imports a generated sample vault, then curl and a WebSocket client drive
 # writes, conflicts, merges, the feed, history, R2 blobs and the live socket.
 #
-#   (cd .. && wrangler dev --port 8787)      # with .dev.vars: SYNC_TOKEN=dev-token-123
+#   (cd .. && wrangler dev --port 8787 --local-upstream 127.0.0.1:8787)  # with .dev.vars: SYNC_TOKEN=dev-token-123
 #   dev/e2e.sh [http://127.0.0.1:8787] [token]
 #
 # Run it against a FRESH local server (rm -rf .wrangler first): it expects

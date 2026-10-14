@@ -25,6 +25,7 @@ invariants are there.
 | `seal.rs` | AES-256-GCM sealing of the refresh token under `GOOGLE_TOKEN_KEY`. No Workers types: tested natively |
 | `sql.rs` | `SqlStore`: the schema, `Store` over `ctx.storage.sql` and R2 |
 | `wrangler.toml` | The bindings: `VAULT` (Durable Object, SQLite migration `v1`), `BLOBS` (R2 bucket `cce-sync-blobs`), `[assets]` (`site/`, the phone app, built by `deploy.sh`, not committed); the `vault.lucas.co` custom domain, with the workers.dev address kept on |
+| `vendor/ironcalc/` | IronCalc 0.8.3 with zip's C codecs off, so the workbook tools (cce-sync's `xlsx` feature) build for wasm32; `[patch.crates-io]` in `Cargo.toml` puts it in place. `VENDORED.md` says what changed and how to bump it |
 
 ## Invariants
 
@@ -112,6 +113,10 @@ the run (`cce-sync = { path = "../cce-sync", default-features = false, features 
 and put the git pin back before committing; `../bump-revs.sh` repins after
 cce-sync is pushed.
 
+Since the `vault.lucas.co` route, `wrangler dev` rewrites every request's
+host to it, so OAuth's origin checks fail; start it with
+`--local-upstream 127.0.0.1:8787` (each script's header says so).
+
 `dev/e2e.sh` runs the Worker under `wrangler dev` (local workerd, local
 SQLite and R2 under `.wrangler/`), imports a sample vault with the
 `cce-sync` CLI, and checks writes, conflicts, merges, the feed and the live
@@ -162,7 +167,8 @@ workers.dev address stays on, and tokens issued there keep working there,
 since each is bound to its origin). Deployed: phase 1 from 688f887,
 then main at 03acbdb (phases 2-6, Worker version 757e6cd5), both on
 2026-10-13, then the table tools (cce-sync 0fdb1b8, Worker version
-0ba23485, `NO_APP=1`) the same evening; the user's vault was imported the same day. All Google secrets
+0ba23485, `NO_APP=1`) and the workbook tools (cce-sync 86214e2) the same
+evening; the user's vault was imported the same day. All Google secrets
 are set; the Google client's redirect URIs must list
 `/oauth/google/callback` on BOTH origins.
 `deploy.sh` builds the phone app from the sibling `../cce-vault-web`
